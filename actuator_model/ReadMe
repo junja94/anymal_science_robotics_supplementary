@@ -1,0 +1,11 @@
+1. data: data used in training actuator model
+    - drive_training: training set
+    - drive_validation: validation set
+
+2. matlab scripts for plotting outputs
+    - plot_walk.m
+    - plot_highspeed.m
+    - plot_validation.m
+
+3. matlab script for generating training data from logfiles
+    - processData.m
