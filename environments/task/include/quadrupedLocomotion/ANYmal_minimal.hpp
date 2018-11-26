@@ -458,25 +458,25 @@ class ANYmal_minimal : public Task<Dtype, StateDim, ActionDim, CommandDim> {
 
           // check foot height to distinguish shank contact
           // TODO: this only works for flat terrain
-          if (idx == 3 && footPos_W[0][2] < 1e-1 && !footContactState_[0]){
+          if (idx == 3 && footPos_W[0][2] < 1e-6 && !footContactState_[0]){
               footContactState_[0] = true;
               footNormal_[0] = anymal_->getContacts()[k].getNormal().e();
               anymal_->getContactPointVel(k, vec3);
               footContactVel_[0] = vec3.e();
               numFootContact_++;
-          } else if (idx == 6 && footPos_W[1][2] < 1e-1 && !footContactState_[1]){
+          } else if (idx == 6 && footPos_W[1][2] < 1e-6 && !footContactState_[1]){
               footContactState_[1] = true;
               footNormal_[1] = anymal_->getContacts()[k].getNormal().e();
               anymal_->getContactPointVel(k, vec3);
               footContactVel_[1] = vec3.e();
               numFootContact_++;
-          } else if (idx == 9 && footPos_W[2][2] < 1e-1 && !footContactState_[2]) {
+          } else if (idx == 9 && footPos_W[2][2] < 1e-6 && !footContactState_[2]) {
               footContactState_[2] = true;
               footNormal_[2] = anymal_->getContacts()[k].getNormal().e();
               anymal_->getContactPointVel(k, vec3);
               footContactVel_[2] = vec3.e();
               numFootContact_++;
-          } else if (idx == 12 && footPos_W[3][2] < 1e-1 && !footContactState_[3]) {
+          } else if (idx == 12 && footPos_W[3][2] < 1e-6 && !footContactState_[3]) {
               footContactState_[3] = true;
               footNormal_[3] = anymal_->getContacts()[k].getNormal().e();
               anymal_->getContactPointVel(k, vec3);
@@ -602,7 +602,7 @@ class ANYmal_minimal : public Task<Dtype, StateDim, ActionDim, CommandDim> {
     if (numFootContact_ < 2) {
       /// noisify body vel
       for (int i = 7; i < 13; i++)
-        state_tp1[i] += rn_.sampleUniform() * 2.0;
+        state_tp1[i] += rn_.sampleUniform() * 0.5;
     } else {
       /// noisify body vel
       for (int i = 7; i < 13; i++)
@@ -760,6 +760,10 @@ class ANYmal_minimal : public Task<Dtype, StateDim, ActionDim, CommandDim> {
     double mag = rn_.sampleUniform01();
     command_temp << 1.0 * rn_.sampleUniform(), 0.4 * rn_.sampleUniform(), 1.2 * rn_.sampleUniform();
 //    command_temp << 1.0 * rn_.sampleUniform(),0.0, 0.0;
+    if(rn_.sampleUniform() > 0.95) {
+    command_temp.setZero();
+    }
+
     setCommand(command_temp);
 
     for (int i = 0; i < 4; i++) footContactState_[i] = false;
@@ -817,7 +821,7 @@ class ANYmal_minimal : public Task<Dtype, StateDim, ActionDim, CommandDim> {
     q_ = q0;
 
     for (int i = 4; i < 19; i++) {
-      q_(i) += q_initialNoiseScale(i) * rn_.sampleNormal() * noiseFtr_ * costScale_; // sample uniform
+      q_(i) += q_initialNoiseScale(i) * rn_.sampleNormal() * noiseFtr_ * costScale2_; // sample uniform
     }
 
     q_[0] = 2.0*rn_.sampleUniform();
@@ -829,14 +833,14 @@ class ANYmal_minimal : public Task<Dtype, StateDim, ActionDim, CommandDim> {
     heading(2) = 0.2 * rn_.sampleUniform();
     heading.normalize();
 
-    angle = 0.1 * rn_.sampleUniform01() * noiseFtr_  * costScale_;
+    angle = 0.1 * rn_.sampleUniform01() * noiseFtr_  * costScale2_;
 
     double sin = std::sin(angle / 2.0);
     q_.template segment<3>(4) = heading * sin;
     q_(3) = std::cos(angle / 2.0);
 
     for (int i = 0; i < 18; i++) {
-      u_(i) = u_initialNoiseScale(i) * rn_.sampleUniform() * noiseFtr_ * costScale_; // sample uniform
+      u_(i) = u_initialNoiseScale(i) * rn_.sampleNormal() * noiseFtr_ * costScale2_; // sample uniform
     }
 
     uPrev_ = u_;
@@ -987,7 +991,7 @@ class ANYmal_minimal : public Task<Dtype, StateDim, ActionDim, CommandDim> {
     desiredLinearSpeed << command_[0], command_[1], 0;
     linSpeedCostScale <<1.0, 1.0, 0.35;
     const double velErr = std::max((4.0 + costScale_*5) * (desiredLinearSpeed - linearSpeed).cwiseProduct(linSpeedCostScale).norm(),0.0);
-    
+
     linvelCost = -10.0 * simulation_dt_ / (exp(velErr) + 2.0 + exp(-velErr));
 
     angVelCost = -6.0 * simulation_dt_ / (exp(yawRateError) + 2.0 + exp(-yawRateError));
@@ -1018,6 +1022,7 @@ class ANYmal_minimal : public Task<Dtype, StateDim, ActionDim, CommandDim> {
     orientationCost = costScale_ * 0.4 * (R_b_.row(2).transpose()-identityRot).norm() * simulation_dt_;
 
     cost = torqueCost + linvelCost + angVelCost + footClearanceCost + velLimitCost + slipCost + previousActionCost + orientationCost + footVelCost;//  ;
+//    cost = torqueCost + linvelCost + angVelCost + velLimitCost + slipCost + previousActionCost + orientationCost;//  ;
 //  cost += 0.005 * numBodyContact_ * simulation_dt_;
 
     if (isnan(cost)) {
@@ -1081,11 +1086,13 @@ class ANYmal_minimal : public Task<Dtype, StateDim, ActionDim, CommandDim> {
     double r, p, y;
     rai::Math::MathFunc::QuattoEuler(quat, r, p, y);
     RotationMatrix R = rai::Math::MathFunc::quatToRotMat(quat);
-    
-//    if(numBaseContact_ > 0 || numBodyContact_ > 8) {
-//      return true;
-//    }
 
+    /// Knee too straight
+    if (q_term(9) > -0.05 || q_term(12) > -0.05 || q_term(15) < 0.05 || q_term(18) < 0.05)
+      return true;
+    ///too crouched
+    if (q_term(9) < -2.8 || q_term(12) < -2.8 || q_term(15) > 2.8 || q_term(18) > 2.8)
+      return true;
     /// hip abduction
     for (int legId = 0; legId < 4; legId++)
       if (q_term(7 + legId * 3) > 1.2 || q_term(7 + legId * 3) < -1.2)
@@ -1095,9 +1102,22 @@ class ANYmal_minimal : public Task<Dtype, StateDim, ActionDim, CommandDim> {
       if (q_term(8 + legId * 3) > 1.5 || q_term(8 + legId * 3) < -1.5)
         return true;
 
-    /// body height limit
-    if (q_term(2) < 0.15 || q_term(2) > 1.2)
-      return true;
+//    if (q_term(2) < 0.35 || q_term(2) > 1.2)
+//      return true;
+
+    if(numBaseContact_ > 0) return true;
+
+//    for(size_t i = 0; i < 12; i++){
+//      if(u_term[6 + i]  > 40.0 || u_term[6 + i] < -40.0){
+//        return true;
+//      }
+//    }
+
+//    for(size_t i = 3; i<6; i++){
+//      if(u_term[i]  > 10.0 || u_term[i] < -10.0){
+//        return true;
+//      }
+//    }
 
     ///simulation diverging
     if (badlyConditioned_) {
@@ -1110,19 +1130,6 @@ class ANYmal_minimal : public Task<Dtype, StateDim, ActionDim, CommandDim> {
       RAIWARN("BAAAAAAAD" << omp_get_thread_num());
       badlyConditioned_ = false;
       return true;
-    }
-
-
-    for(size_t i = 0; i < 12; i++){
-      if(u_term[6 + i]  > 150.0 || u_term[6 + i] < -150.0){
-        return true;
-      }
-    }
-
-    for(size_t i = 3; i<6; i++){
-      if(u_term[i]  > 40.0 || u_term[6 + i] < -40.0){
-        return true;
-      }
     }
 
     return false;

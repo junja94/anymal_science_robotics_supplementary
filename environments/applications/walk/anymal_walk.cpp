@@ -91,11 +91,12 @@ int main(int argc, char *argv[]) {
 
   std::vector<rai::Task::Task<Dtype, StateDim, ActionDim, 0> *> taskVector;
   for (auto &task : taskVec) {
-    task->setDiscountFactor(0.9988);
+    task->setDiscountFactor(0.998);
     task->setValueAtTerminalState(3.0);
     task->setControlUpdate_dt(0.005);
     task->setTimeLimitPerEpisode(4.0);
     task->setRealTimeFactor(1.0);
+    task->setNoiseFtr(0.4);
     taskVector.push_back(task.get());
   }
 
@@ -105,6 +106,10 @@ int main(int argc, char *argv[]) {
   std::experimental::filesystem::copy(std::string(__FILE__),
                                       std::experimental::filesystem::path(RAI_LOG_PATH+"/APPFILESAVE"));
 
+  /// the first one is not noisified
+  for (int i=1; i<taskVec.size(); i++)
+    taskVec[i]->noisifyDynamics();
+
   //////////////////////////// Define Noise /////////////////////////////
   NoiseCov covariance = NoiseCov::Identity();
   std::vector<NormNoise> noiseVec(nThread, NormNoise(covariance));
@@ -113,7 +118,7 @@ int main(int argc, char *argv[]) {
     noiseVector.push_back(&noise);
 
   ////////////////////////// Define Function approximations //////////
-  Vfunction_TensorFlow vfunction("gpu,0", "MLP", "tanh 1e-3 97 256 128 1", 0.001);
+  Vfunction_TensorFlow vfunction("gpu,0", "MLP", "tanh 1e-3 97 192 128 1", 0.001);
   Policy_TensorFlow policy("gpu,0", "MLP", "tanh 1e-3 97 256 128 12", 0.001);
 
 // policy.loadParam("/home/joonho/Documents/ANYparam/stand_new/flip1/policy_3000.txt");
@@ -124,7 +129,7 @@ int main(int argc, char *argv[]) {
 
   ////////////////////////// Algorithm ////////////////////////////////
   rai::Algorithm::TRPO_gae<Dtype, StateDim, ActionDim>
-      algorithm(taskVector, &vfunction, &policy, noiseVector, &acquisitor, 0.97, 0, 0, 10, 1.0, 0.004, false);
+      algorithm(taskVector, &vfunction, &policy, noiseVector, &acquisitor, 0.99, 0, 0, 10, 1.0, 0.004, false);
 
   //algorithm.scalePolicyVar(2.0); ///retrain flip
 
@@ -134,21 +139,16 @@ int main(int argc, char *argv[]) {
   figurePropertiesEVP.xlabel = "N. Episodes";
   figurePropertiesEVP.ylabel = "Performance";
 
-  constexpr int loggingInterval = 200;
+  constexpr int loggingInterval = 100;
   constexpr int iterlimit = 30000;
   ////////////////////////// Learning /////////////////////////////////
 
-  double noisefactor = 0.2;
-
   for (auto &task : taskVec) {
-    task->setTaskLabel(0);
     task->setcostScale1(0.3);
     task->setcostScale2(0.1);
   }
 
   double actionLimit = M_PI;
-  double height = 0.02;
-
   for (int iterationNumber = 0; iterationNumber < iterlimit + 1; iterationNumber++) {
 
     LOG(INFO) << "iter :" << iterationNumber;
@@ -162,21 +162,13 @@ int main(int argc, char *argv[]) {
       algorithm.setVisualizationLevel(1);
       taskVector[0]->enableVideoRecording();
     }
-//
-//    if(iterationNumber % 100 == 0){
-//      double newHeight = height * std::pow(0.01, std::pow(0.9992, iterationNumber));
-//
-//      for (auto &task : taskVec)
-//        task->renewTerrain(newHeight);
-//    }
 
     for (auto &task : taskVec) {
-      task->increaseCostScale1(0.997); // TODO: slower?
-      task->increaseCostScale2(0.997);
-      task->setActionLimit(actionLimit);
+      task->increaseCostScale1(0.998); // TODO: slower?
+      task->increaseCostScale2(0.998);
     }
 
-    int nEpisode = 50000 / (taskVec[0]->timeLimit() / taskVec[0]->dt());
+    int nEpisode = 100000 / (taskVec[0]->timeLimit() / taskVec[0]->dt());
     algorithm.runOneLoopForNEpisode(nEpisode);
 
     if (iterationNumber % loggingInterval == 0 || iterationNumber == iterlimit) {
